@@ -1,0 +1,20 @@
+agent:
+  id: server-01
+
+control:
+  endpoint: ""
+  token: ""
+  timeout: 10s
+
+knockd:
+  config: /etc/knockd.conf
+  service: knockd
+
+firewall:
+  backend: nftables
+
+storage:
+  path: /var/lib/knockd-agent/state.db
+
+logging:
+  level: info
