@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/NullGeorge/congenial-octo-doodle/internal/events"
 )
@@ -28,6 +29,7 @@ var (
 	statusMessage   = regexp.MustCompile(`^command returned non-zero status code \(\d+\)$`)
 	grantingCommand = regexp.MustCompile(`(?:^|\s)(?:add|insert|-A|-I)(?:\s|$)`)
 	revokingCommand = regexp.MustCompile(`(?:^|\s)(?:delete|del|remove|-D)(?:\s|$)`)
+	timeoutClause   = regexp.MustCompile(`(?:^|\s)timeout\s+([0-9dhms]+)(?:\s|$)`)
 )
 
 const runningCommand = "running command: "
@@ -72,6 +74,11 @@ func ParseLine(line string) (events.Event, bool) {
 		switch {
 		case granting && !revoking:
 			event.Type = events.AccessGranted
+			// The grant carries its own lifetime, so no privileged lookup of
+			// the live ruleset is needed to know when access lapses.
+			if m := timeoutClause.FindStringSubmatch(command); m != nil {
+				event.TTL, _ = parseCommandTTL(m[1])
+			}
 		case revoking && !granting:
 			event.Type = events.AccessRevoked
 		default:
@@ -112,6 +119,50 @@ func parseStage(digits string) int {
 		return 0
 	}
 	return stage
+}
+
+// maxCommandTTL bounds a parsed lifetime. It keeps absurd input from
+// overflowing the duration arithmetic below.
+const maxCommandTTL = 365 * 24 * time.Hour
+
+var timeUnits = map[byte]time.Duration{
+	'd': 24 * time.Hour,
+	'h': time.Hour,
+	'm': time.Minute,
+	's': time.Second,
+}
+
+// parseCommandTTL reads an nftables time spec such as 15m or 1d2h3m4s. A bare
+// number is counted as seconds, which is how ipset spells the same argument.
+func parseCommandTTL(spec string) (time.Duration, bool) {
+	var total, value time.Duration
+	digits := false
+	for i := range len(spec) {
+		if c := spec[i]; c >= '0' && c <= '9' {
+			if value > maxCommandTTL {
+				return 0, false
+			}
+			value = value*10 + time.Duration(c-'0')
+			digits = true
+			continue
+		}
+		unit, ok := timeUnits[spec[i]]
+		if !ok || !digits || value > maxCommandTTL/unit {
+			return 0, false
+		}
+		total += value * unit
+		value, digits = 0, false
+		if total > maxCommandTTL {
+			return 0, false
+		}
+	}
+	if digits {
+		total += value * time.Second
+	}
+	if total <= 0 || total > maxCommandTTL {
+		return 0, false
+	}
+	return total, true
 }
 
 func extractIP(line string) string {

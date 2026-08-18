@@ -10,16 +10,9 @@ import (
 	"github.com/NullGeorge/congenial-octo-doodle/internal/storage"
 )
 
-type AccessRule struct {
-	SourceIP  string
-	Rule      string
-	Port      uint16
-	Protocol  string
-	State     string
-	Source    string
-	UpdatedAt time.Time
-	ExpiresAt *time.Time
-}
+// AccessRule is defined by the storage layer so the in-memory view and the
+// persisted row cannot drift apart.
+type AccessRule = storage.AccessRule
 
 type Engine struct {
 	store *storage.Store
@@ -52,8 +45,7 @@ func (e *Engine) Apply(event events.Event) error {
 	}
 
 	if event.Type == events.AccessGranted || event.Type == events.AccessRevoked {
-		key := ruleKey(event.SourceIP, event.Rule, event.Port)
-		e.rules[key] = AccessRule{
+		rule := AccessRule{
 			SourceIP:  event.SourceIP,
 			Rule:      event.Rule,
 			Port:      event.Port,
@@ -61,6 +53,16 @@ func (e *Engine) Apply(event events.Event) error {
 			State:     status,
 			Source:    "knockd",
 			UpdatedAt: event.Timestamp,
+		}
+		// The firewall command states how long it grants access for, so the
+		// lapse is known up front and never has to be read back from nftables.
+		if event.Type == events.AccessGranted && event.TTL > 0 {
+			expiresAt := event.Timestamp.Add(event.TTL)
+			rule.ExpiresAt = &expiresAt
+		}
+		e.rules[ruleKey(event.SourceIP, event.Rule, event.Port)] = rule
+		if err := e.store.SaveRule(rule); err != nil {
+			return err
 		}
 	}
 
@@ -74,8 +76,12 @@ func (e *Engine) Rules() []AccessRule {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
+	now := time.Now().UTC()
 	result := make([]AccessRule, 0, len(e.rules))
 	for _, rule := range e.rules {
+		if rule.State == "open" && rule.Expired(now) {
+			rule.State = "expired"
+		}
 		result = append(result, rule)
 	}
 	return result

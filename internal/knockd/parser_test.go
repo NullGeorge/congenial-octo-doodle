@@ -2,6 +2,7 @@ package knockd
 
 import (
 	"testing"
+	"time"
 
 	"github.com/NullGeorge/congenial-octo-doodle/internal/events"
 )
@@ -17,6 +18,7 @@ func TestParseLine(t *testing.T) {
 		ip    string
 		rule  string
 		stage int
+		ttl   time.Duration
 	}{
 		{
 			name: "first stage", line: "203.0.113.209: openSSH: Stage 1", ok: true,
@@ -42,6 +44,7 @@ func TestParseLine(t *testing.T) {
 			name: "grant via nftables",
 			line: "openSSH: running command: /usr/sbin/nft add element inet portknock ssh_allowed { 203.0.113.209 timeout 15m }",
 			ok:   true, typ: events.AccessGranted, ip: "203.0.113.209", rule: "openSSH",
+			ttl: 15 * time.Minute,
 		},
 		{
 			name: "revoke via nftables",
@@ -101,6 +104,9 @@ func TestParseLine(t *testing.T) {
 			if got.Stage != tt.stage {
 				t.Errorf("stage = %d, want %d", got.Stage, tt.stage)
 			}
+			if got.TTL != tt.ttl {
+				t.Errorf("ttl = %s, want %s", got.TTL, tt.ttl)
+			}
 			if got.Message != tt.line {
 				t.Errorf("message = %q, want %q", got.Message, tt.line)
 			}
@@ -151,5 +157,39 @@ func TestParseLineTimeoutNeverGrants(t *testing.T) {
 	}
 	if event.Type != events.SequenceFailed {
 		t.Fatalf("type = %q, want %q", event.Type, events.SequenceFailed)
+	}
+}
+
+// The lifetime written into the grant command is the only way to know when
+// access lapses without CAP_NET_ADMIN, so both the nftables spelling (15m)
+// and the ipset spelling (bare seconds) have to parse.
+func TestParseCommandTTL(t *testing.T) {
+	tests := []struct {
+		spec string
+		want time.Duration
+		ok   bool
+	}{
+		{spec: "15m", want: 15 * time.Minute, ok: true},
+		{spec: "900s", want: 15 * time.Minute, ok: true},
+		{spec: "900", want: 15 * time.Minute, ok: true},
+		{spec: "1d2h3m4s", want: 26*time.Hour + 3*time.Minute + 4*time.Second, ok: true},
+		// Rejected: a zero lifetime, a unit with no number, an unknown unit,
+		// nothing at all, and a value too large to be a real firewall grant.
+		{spec: "0m"},
+		{spec: "m"},
+		{spec: "15x"},
+		{spec: ""},
+		{spec: "99999999999999999999d"},
+	}
+
+	for _, tt := range tests {
+		got, ok := parseCommandTTL(tt.spec)
+		if ok != tt.ok {
+			t.Errorf("parseCommandTTL(%q) ok = %v, want %v", tt.spec, ok, tt.ok)
+			continue
+		}
+		if got != tt.want {
+			t.Errorf("parseCommandTTL(%q) = %s, want %s", tt.spec, got, tt.want)
+		}
 	}
 }

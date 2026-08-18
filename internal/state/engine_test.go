@@ -96,3 +96,91 @@ func TestEngineAppliesRealKnockdSequence(t *testing.T) {
 		t.Errorf("stored attempts = %d, want 3", attempts)
 	}
 }
+
+// A grant states its own lifetime in the command knockd ran, so the engine
+// knows when access lapses without ever reading the live ruleset. Reading it
+// would need CAP_NET_ADMIN, which this daemon deliberately does not hold.
+func TestEngineExpiresGrantsFromCommandTTL(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "state.db")
+	store, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	const line = "openSSH: running command: /usr/sbin/nft add element inet portknock ssh_allowed { 203.0.113.5 timeout 15m }"
+	event, ok := knockd.ParseLine(line)
+	if !ok {
+		t.Fatalf("ParseLine(%q) ignored a real grant", line)
+	}
+	if event.TTL != 15*time.Minute {
+		t.Fatalf("ttl = %s, want 15m0s", event.TTL)
+	}
+
+	engine := NewEngine(store)
+
+	// Granted an hour ago, so the fifteen minute lifetime has run out.
+	event.ID = "stale"
+	event.Timestamp = time.Now().UTC().Add(-time.Hour)
+	if err := engine.Apply(event); err != nil {
+		t.Fatalf("apply stale grant: %v", err)
+	}
+
+	rules := engine.Rules()
+	if len(rules) != 1 {
+		t.Fatalf("rules = %d, want 1: %+v", len(rules), rules)
+	}
+	if rules[0].ExpiresAt == nil {
+		t.Fatal("expiry was not derived from the command")
+	}
+	if want := event.Timestamp.Add(15 * time.Minute); !rules[0].ExpiresAt.Equal(want) {
+		t.Errorf("expires at %s, want %s", rules[0].ExpiresAt, want)
+	}
+	if rules[0].State != "expired" {
+		t.Errorf("state = %q, want expired", rules[0].State)
+	}
+
+	// A grant issued now for another address is still open.
+	event.ID = "fresh"
+	event.SourceIP = "198.51.100.167"
+	event.Timestamp = time.Now().UTC()
+	if err := engine.Apply(event); err != nil {
+		t.Fatalf("apply fresh grant: %v", err)
+	}
+
+	states := make(map[string]string)
+	for _, rule := range engine.Rules() {
+		states[rule.SourceIP] = rule.State
+	}
+	if states["203.0.113.5"] != "expired" {
+		t.Errorf("stale grant state = %q, want expired", states["203.0.113.5"])
+	}
+	if states["198.51.100.167"] != "open" {
+		t.Errorf("fresh grant state = %q, want open", states["198.51.100.167"])
+	}
+
+	// `knockd-agent rules` reads the database, not the running daemon, so the
+	// same verdict has to survive a restart.
+	persisted, err := store.ListRules()
+	if err != nil {
+		t.Fatalf("list rules: %v", err)
+	}
+	if len(persisted) != 2 {
+		t.Fatalf("persisted %d rules, want 2: %+v", len(persisted), persisted)
+	}
+	now := time.Now().UTC()
+	for _, rule := range persisted {
+		switch rule.SourceIP {
+		case "203.0.113.5":
+			if !rule.Expired(now) {
+				t.Error("stale grant is not expired after reload")
+			}
+		case "198.51.100.167":
+			if rule.Expired(now) {
+				t.Error("fresh grant is expired after reload")
+			}
+		default:
+			t.Errorf("unexpected persisted rule for %q", rule.SourceIP)
+		}
+	}
+}

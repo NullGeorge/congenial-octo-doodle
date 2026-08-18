@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/NullGeorge/congenial-octo-doodle/internal/events"
+	"github.com/NullGeorge/congenial-octo-doodle/internal/geoip"
 	"github.com/NullGeorge/congenial-octo-doodle/internal/knockd"
 	"github.com/NullGeorge/congenial-octo-doodle/internal/state"
 )
@@ -14,14 +14,16 @@ import (
 type Agent struct {
 	reader *knockd.LogReader
 	state  *state.Engine
+	geo    *geoip.DB
 	log    *log.Logger
 }
 
-func New(reader *knockd.LogReader, state *state.Engine, logger *log.Logger) *Agent {
+// New builds the agent. geo may be nil, in which case events carry no country.
+func New(reader *knockd.LogReader, state *state.Engine, geo *geoip.DB, logger *log.Logger) *Agent {
 	if logger == nil {
 		logger = log.Default()
 	}
-	return &Agent{reader: reader, state: state, log: logger}
+	return &Agent{reader: reader, state: state, geo: geo, log: logger}
 }
 
 func (a *Agent) Run(ctx context.Context) error {
@@ -32,10 +34,12 @@ func (a *Agent) Run(ctx context.Context) error {
 		}
 		event.ID = fmt.Sprintf("%d", time.Now().UnixNano())
 		event.Timestamp = time.Now().UTC()
+		event.Country = a.geo.Country(event.SourceIP)
 		if err := a.state.Apply(event); err != nil {
 			return fmt.Errorf("apply event %s: %w", event.Type, err)
 		}
-		a.log.Printf("event=%s ip=%s rule=%s", event.Type, event.SourceIP, event.Rule)
+		a.log.Printf("event=%s ip=%s country=%s rule=%s ttl=%s",
+			event.Type, event.SourceIP, event.Country, event.Rule, event.TTL)
 		return nil
 	}); err != nil && ctx.Err() == nil {
 		return err
@@ -44,5 +48,3 @@ func (a *Agent) Run(ctx context.Context) error {
 }
 
 func (a *Agent) Rules() []state.AccessRule { return a.state.Rules() }
-
-var _ = events.KnockReceived

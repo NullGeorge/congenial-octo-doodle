@@ -3,12 +3,11 @@ package config
 import "time"
 
 type Config struct {
-	Agent    AgentConfig    `yaml:"agent"`
-	Control  ControlConfig  `yaml:"control"`
-	Knockd   KnockdConfig   `yaml:"knockd"`
-	Firewall FirewallConfig `yaml:"firewall"`
-	Storage  StorageConfig  `yaml:"storage"`
-	Logging  LoggingConfig  `yaml:"logging"`
+	Agent   AgentConfig   `yaml:"agent"`
+	Control ControlConfig `yaml:"control"`
+	Knockd  KnockdConfig  `yaml:"knockd"`
+	Storage StorageConfig `yaml:"storage"`
+	Logging LoggingConfig `yaml:"logging"`
 }
 
 type AgentConfig struct {
@@ -24,10 +23,6 @@ type ControlConfig struct {
 type KnockdConfig struct {
 	ConfigPath string `yaml:"config"`
 	Service    string `yaml:"service"`
-}
-
-type FirewallConfig struct {
-	Backend string `yaml:"backend"`
 }
 
 type StorageConfig struct {

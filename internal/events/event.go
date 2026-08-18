@@ -21,8 +21,14 @@ type Event struct {
 	Type      Type      `json:"type"`
 	Timestamp time.Time `json:"timestamp"`
 	SourceIP  string    `json:"source_ip,omitempty"`
-	Rule      string    `json:"rule,omitempty"`
-	Port      uint16    `json:"port,omitempty"`
-	Stage     int       `json:"stage,omitempty"`
-	Message   string    `json:"message,omitempty"`
+	// Country is the ISO 3166-1 alpha-2 code for SourceIP, empty when no
+	// geolocation database is loaded or the address is not in it.
+	Country string `json:"country,omitempty"`
+	Rule    string `json:"rule,omitempty"`
+	Port    uint16 `json:"port,omitempty"`
+	Stage   int    `json:"stage,omitempty"`
+	// TTL is the lifetime the executed firewall command granted, taken from
+	// the command itself. Zero when the command carried no timeout.
+	TTL     time.Duration `json:"ttl,omitempty"`
+	Message string        `json:"message,omitempty"`
 }
