@@ -62,6 +62,10 @@ AmbientCapabilities=
 NoNewPrivileges=true
 RestrictSUIDSGID=true
 
+# The state database records every knock and every address that reached this
+# host. Default permissions would leave it world readable.
+UMask=0077
+
 ProtectSystem=strict
 ProtectHome=true
 ProtectProc=invisible
