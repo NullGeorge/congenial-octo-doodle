@@ -4,7 +4,7 @@ IMAGE ?= knockd-agent:dev
 DIST ?= dist
 
 build:
-	docker build --target build --output type=local,dest=$(DIST) .
+	docker build --target export --output type=local,dest=$(DIST) .
 
 # Run the Go test suite inside the same Docker toolchain.
 test:
