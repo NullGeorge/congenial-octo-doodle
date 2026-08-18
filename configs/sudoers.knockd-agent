@@ -1,0 +1,11 @@
+# Install as /etc/sudoers.d/knockd-agent, owner root:root, mode 0440.
+#
+# The daemon runs with no capabilities and borrows root only for the moment it
+# takes to run knock-helper. sudo cannot meaningfully constrain arguments, so
+# it is not asked to: the helper validates its own input and every firewall
+# command it can build is a fixed template against one named set.
+#
+# Nothing else is granted. In particular the agent user can not run nft or
+# systemctl directly, which is what keeps a compromised daemon from flushing
+# the ruleset.
+knockd-agent ALL=(root) NOPASSWD: /usr/local/sbin/knock-helper

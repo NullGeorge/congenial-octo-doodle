@@ -6,9 +6,10 @@ RUN go mod download
 COPY . .
 
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/knockd-agent ./cmd/agent
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/knock-helper ./cmd/knock-helper
 
 FROM scratch AS export
-COPY --from=build /out/knockd-agent /
+COPY --from=build /out/knockd-agent /out/knock-helper /
 
 FROM alpine:3.22
 COPY --from=build /out/knockd-agent /usr/local/bin/knockd-agent

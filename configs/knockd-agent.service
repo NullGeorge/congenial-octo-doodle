@@ -19,6 +19,9 @@ Type=simple
 # database and append: -geoip /var/lib/knockd-agent/country.csv
 #   https://github.com/sapics/ip-location-db/releases/download/latest/user-country-ipv4-num.csv
 # A path given here must exist, otherwise start-up fails on purpose.
+# Adding -helper /usr/local/sbin/knock-helper turns on /allow, /revoke and
+# /knockd from the chat. It also requires configs/sudoers.knockd-agent and the
+# capability changes described further down. Without it the bot is read only.
 ExecStart=/usr/local/bin/knockd-agent run -service knockd
 User=knockd-agent
 Group=knockd-agent
@@ -38,7 +41,22 @@ SupplementaryGroups=systemd-journal
 # default -db path points.
 StateDirectory=knockd-agent
 
-# No capability is needed, so none is permitted, and none can be regained.
+# As shipped the agent watches and reports, and needs no capability at all.
+#
+# Enabling /allow, /revoke and /knockd means borrowing root through sudo, and
+# sudo is setuid: it cannot function under either of the two settings below.
+# Measured on a Debian 12 host, with the helper installed and sudoers in place:
+#   CapabilityBoundingSet= (empty) -> sudo: unable to change to root gid
+#   NoNewPrivileges=true           -> sudo: the "no new privileges" flag is set
+# The bounding set also caps what root itself may hold, so without CAP_NET_ADMIN
+# the helper reaches nft and is refused with "you must be root".
+#
+# To turn commands on, add -helper to ExecStart and replace the three lines
+# below with:
+#   CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_NET_ADMIN CAP_AUDIT_WRITE
+#   NoNewPrivileges=false
+# The daemon still holds no capability of its own. That set only bounds what a
+# setuid exec may gain, and sudoers permits exactly one binary.
 CapabilityBoundingSet=
 AmbientCapabilities=
 NoNewPrivileges=true

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/NullGeorge/congenial-octo-doodle/internal/agent"
+	"github.com/NullGeorge/congenial-octo-doodle/internal/control"
 	"github.com/NullGeorge/congenial-octo-doodle/internal/geoip"
 	"github.com/NullGeorge/congenial-octo-doodle/internal/knockd"
 	"github.com/NullGeorge/congenial-octo-doodle/internal/notify"
@@ -58,6 +59,8 @@ func run(args []string) error {
 	notifyEvery := fs.Duration("notify-interval", 10*time.Second, "how often the outbox is flushed")
 	heartbeatURL := fs.String("heartbeat-url", "", "external watchdog url pinged on a schedule")
 	heartbeatEvery := fs.Duration("heartbeat-interval", 5*time.Minute, "how often the watchdog is pinged")
+	helperPath := fs.String("helper", "", "privileged helper binary; remote commands are off when empty")
+	defaultTTL := fs.Duration("default-ttl", 15*time.Minute, "lifetime used by /allow when none is given")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -89,14 +92,19 @@ func run(args []string) error {
 		return err
 	}
 	notifying := token != ""
+	commanding := notifying && *helperPath != ""
 	if notifying {
-		notifier := notify.New(store, telegram.New(token, *apiURL), chat, log.Default())
-		go notifier.Run(ctx, *notifyEvery)
+		api := telegram.New(token, *apiURL)
+		go notify.New(store, api, chat, log.Default()).Run(ctx, *notifyEvery)
+		if commanding {
+			helper := control.Helper{Path: *helperPath}
+			go control.New(api, helper, engine, store, chat, *defaultTTL, log.Default()).Run(ctx)
+		}
 	}
 	go notify.Heartbeat(ctx, *heartbeatURL, *heartbeatEvery, log.Default())
 
-	log.Printf("starting knockd-agent service=%s db=%s geoip=%d ranges notify=%t heartbeat=%t",
-		*service, *dbPath, geo.Len(), notifying, *heartbeatURL != "")
+	log.Printf("starting knockd-agent service=%s db=%s geoip=%d ranges notify=%t commands=%t heartbeat=%t",
+		*service, *dbPath, geo.Len(), notifying, commanding, *heartbeatURL != "")
 	return runner.Run(ctx)
 }
 

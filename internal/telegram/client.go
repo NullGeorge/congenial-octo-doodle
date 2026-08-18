@@ -43,17 +43,23 @@ func New(token, baseURL string) *Client {
 // Chat and sender identity are all this agent inspects; the rest of the Bot
 // API payload is deliberately ignored.
 type Update struct {
-	UpdateID int64 `json:"update_id"`
-	Message  *struct {
-		Chat struct {
-			ID int64 `json:"id"`
-		} `json:"chat"`
-		From *struct {
-			ID       int64  `json:"id"`
-			Username string `json:"username"`
-		} `json:"from"`
-		Text string `json:"text"`
-	} `json:"message"`
+	UpdateID int64    `json:"update_id"`
+	Message  *Message `json:"message"`
+}
+
+type Message struct {
+	Chat Chat   `json:"chat"`
+	From *User  `json:"from"`
+	Text string `json:"text"`
+}
+
+type Chat struct {
+	ID int64 `json:"id"`
+}
+
+type User struct {
+	ID       int64  `json:"id"`
+	Username string `json:"username"`
 }
 
 type envelope struct {
