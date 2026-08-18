@@ -21,6 +21,7 @@ import (
 	"github.com/NullGeorge/congenial-octo-doodle/internal/state"
 	"github.com/NullGeorge/congenial-octo-doodle/internal/storage"
 	"github.com/NullGeorge/congenial-octo-doodle/internal/telegram"
+	"github.com/NullGeorge/congenial-octo-doodle/internal/version"
 )
 
 func main() {
@@ -40,6 +41,8 @@ func main() {
 		if err := listRules(os.Args[2:]); err != nil {
 			log.Fatal(err)
 		}
+	case "version":
+		fmt.Println("knockd-agent " + version.String())
 	case "attempts":
 		fmt.Println("knockd-agent: attempts command will be connected to the state store in the next step")
 	default:
@@ -103,7 +106,8 @@ func run(args []string) error {
 	}
 	go notify.Heartbeat(ctx, *heartbeatURL, *heartbeatEvery, log.Default())
 
-	log.Printf("starting knockd-agent service=%s db=%s geoip=%d ranges notify=%t commands=%t heartbeat=%t",
+	log.Printf("starting knockd-agent %s", version.String())
+	log.Printf("service=%s db=%s geoip=%d ranges notify=%t commands=%t heartbeat=%t",
 		*service, *dbPath, geo.Len(), notifying, commanding, *heartbeatURL != "")
 	return runner.Run(ctx)
 }
@@ -202,7 +206,7 @@ func describeExpiry(expiresAt *time.Time, now time.Time) string {
 }
 
 func usage() {
-	fmt.Println("usage: knockd-agent <run|status|rules|attempts>")
+	fmt.Println("usage: knockd-agent <run|status|rules|attempts|version>")
 	fmt.Println("       knockd-agent run   [-db path] [-service name] [-geoip path]")
 	fmt.Println("       knockd-agent rules [-db path] [-all]")
 }

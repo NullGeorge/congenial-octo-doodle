@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/NullGeorge/congenial-octo-doodle/internal/version"
 )
 
 const (
@@ -97,6 +99,9 @@ func run(args []string) error {
 		}
 		fmt.Printf("knockd %s ok\n", args[1])
 
+	case "version":
+		fmt.Println("knock-helper " + version.String())
+
 	default:
 		return usage()
 	}
@@ -104,7 +109,7 @@ func run(args []string) error {
 }
 
 func usage() error {
-	return fmt.Errorf("usage: knock-helper <allow <ipv4> <duration>|revoke <ipv4>|service <start|stop|restart|status>>")
+	return fmt.Errorf("usage: knock-helper <allow <ipv4> <duration>|revoke <ipv4>|service <start|stop|restart|status>|version>")
 }
 
 // allowArgs builds the element insert. The address is re-rendered from the
