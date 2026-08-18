@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -39,6 +40,7 @@ CREATE TABLE IF NOT EXISTS events (
     source_ip TEXT,
     rule TEXT,
     port INTEGER,
+    stage INTEGER,
     message TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
@@ -67,9 +69,15 @@ CREATE TABLE IF NOT EXISTS attempts (
 CREATE INDEX IF NOT EXISTS idx_attempts_timestamp ON attempts(timestamp);
 CREATE INDEX IF NOT EXISTS idx_attempts_source_ip ON attempts(source_ip);
 `
-	_, err := s.db.Exec(schema)
-	if err != nil {
+	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
+	}
+
+	// Databases created before the stage column existed need it added. SQLite
+	// has no ADD COLUMN IF NOT EXISTS, so a duplicate column is not an error.
+	if _, err := s.db.Exec(`ALTER TABLE events ADD COLUMN stage INTEGER`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("add events.stage: %w", err)
 	}
 	return nil
 }
@@ -83,10 +91,10 @@ func (s *Store) SaveEvent(event events.Event) error {
 	}
 
 	_, err := s.db.Exec(`
-INSERT OR IGNORE INTO events(id, type, timestamp, source_ip, rule, port, message)
-VALUES (?, ?, ?, ?, ?, ?, ?)`,
+INSERT OR IGNORE INTO events(id, type, timestamp, source_ip, rule, port, stage, message)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.ID, event.Type, event.Timestamp.UTC().Format(time.RFC3339Nano),
-		event.SourceIP, event.Rule, event.Port, event.Message)
+		event.SourceIP, event.Rule, event.Port, event.Stage, event.Message)
 	return err
 }
 

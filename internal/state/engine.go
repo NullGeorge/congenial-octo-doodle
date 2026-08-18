@@ -1,6 +1,7 @@
 package state
 
 import (
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -53,12 +54,12 @@ func (e *Engine) Apply(event events.Event) error {
 	if event.Type == events.AccessGranted || event.Type == events.AccessRevoked {
 		key := ruleKey(event.SourceIP, event.Rule, event.Port)
 		e.rules[key] = AccessRule{
-			SourceIP: event.SourceIP,
-			Rule: event.Rule,
-			Port: event.Port,
-			Protocol: "tcp",
-			State: status,
-			Source: "knockd",
+			SourceIP:  event.SourceIP,
+			Rule:      event.Rule,
+			Port:      event.Port,
+			Protocol:  "tcp",
+			State:     status,
+			Source:    "knockd",
 			UpdatedAt: event.Timestamp,
 		}
 	}
@@ -81,5 +82,5 @@ func (e *Engine) Rules() []AccessRule {
 }
 
 func ruleKey(ip, rule string, port uint16) string {
-	return ip + "|" + rule + "|" + string(rune(port))
+	return ip + "|" + rule + "|" + strconv.FormatUint(uint64(port), 10)
 }
