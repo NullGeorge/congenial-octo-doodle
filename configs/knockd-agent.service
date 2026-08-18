@@ -15,9 +15,19 @@ Wants=knockd.service
 
 [Service]
 Type=simple
+# Country labels are optional. Fetch the range table, drop it next to the
+# database and append: -geoip /var/lib/knockd-agent/country.csv
+#   https://github.com/sapics/ip-location-db/releases/download/latest/user-country-ipv4-num.csv
+# A path given here must exist, otherwise start-up fails on purpose.
 ExecStart=/usr/local/bin/knockd-agent run -service knockd
 User=knockd-agent
 Group=knockd-agent
+
+# BOT_TOKEN and CHAT_ID live here, one KEY=value per line. systemd reads this
+# as root before dropping privileges, so the file can be 0600 root:root and
+# still reach an unprivileged service. Keeping the token out of ExecStart is
+# the point: process arguments are world readable through ps.
+EnvironmentFile=-/etc/knockd-agent.env
 
 # The journal is reachable through group membership, not through root: the
 # directory is root:systemd-journal with an ACL. Drop this line and the agent

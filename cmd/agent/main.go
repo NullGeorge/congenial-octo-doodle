@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -83,18 +84,14 @@ func run(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	notifying := false
-	if *tokenPath != "" {
-		token, err := readToken(*tokenPath)
-		if err != nil {
-			return err
-		}
-		if *chatID == 0 {
-			return fmt.Errorf("-telegram-chat-id is required together with -telegram-token-file")
-		}
-		notifier := notify.New(store, telegram.New(token, *apiURL), *chatID, log.Default())
+	token, chat, err := credentials(*tokenPath, *chatID)
+	if err != nil {
+		return err
+	}
+	notifying := token != ""
+	if notifying {
+		notifier := notify.New(store, telegram.New(token, *apiURL), chat, log.Default())
 		go notifier.Run(ctx, *notifyEvery)
-		notifying = true
 	}
 	go notify.Heartbeat(ctx, *heartbeatURL, *heartbeatEvery, log.Default())
 
@@ -103,18 +100,39 @@ func run(args []string) error {
 	return runner.Run(ctx)
 }
 
-// readToken keeps the bot token out of the process arguments, which every
-// user on the host can read from ps.
-func readToken(path string) (string, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("read telegram token: %w", err)
+// credentials resolves the bot token and chat from a file or, failing that,
+// from BOT_TOKEN and CHAT_ID in the environment. Neither route puts the token
+// in the process arguments, which every user on the host can read from ps;
+// the environment route lets systemd read a root-only EnvironmentFile and
+// hand the value to an unprivileged service.
+func credentials(tokenPath string, chatID int64) (string, int64, error) {
+	token := strings.TrimSpace(os.Getenv("BOT_TOKEN"))
+	if tokenPath != "" {
+		raw, err := os.ReadFile(tokenPath)
+		if err != nil {
+			return "", 0, fmt.Errorf("read telegram token: %w", err)
+		}
+		token = strings.TrimSpace(string(raw))
+		if token == "" {
+			return "", 0, fmt.Errorf("telegram token file %s is empty", tokenPath)
+		}
 	}
-	token := strings.TrimSpace(string(raw))
 	if token == "" {
-		return "", fmt.Errorf("telegram token file %s is empty", path)
+		return "", 0, nil
 	}
-	return token, nil
+
+	if chatID == 0 {
+		raw := strings.TrimSpace(os.Getenv("CHAT_ID"))
+		if raw == "" {
+			return "", 0, fmt.Errorf("a bot token is set but no chat: pass -telegram-chat-id or CHAT_ID")
+		}
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return "", 0, fmt.Errorf("CHAT_ID %q is not a chat id: %w", raw, err)
+		}
+		chatID = parsed
+	}
+	return token, chatID, nil
 }
 
 // listRules prints the access the daemon recorded, with the lifetime each
