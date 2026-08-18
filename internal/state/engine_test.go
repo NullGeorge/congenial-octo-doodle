@@ -33,7 +33,11 @@ func TestEngineAppliesRealKnockdSequence(t *testing.T) {
 		"openSSH: running command: /usr/sbin/nft add element inet portknock ssh_allowed { 203.0.113.209 timeout 15m }",
 	}
 
-	base := time.Date(2026, 8, 18, 18, 27, 4, 0, time.UTC)
+	// Anchored to now, not to a fixed date: the grant carries a fifteen minute
+	// lifetime, and Rules() compares it against the wall clock. A hardcoded
+	// timestamp turns this into a test that starts failing once that moment
+	// passes in real time.
+	base := time.Now().UTC()
 	for i, line := range lines {
 		event, ok := knockd.ParseLine(line)
 		if !ok {
