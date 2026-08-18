@@ -1,0 +1,56 @@
+# The agent only reads the knockd journal and writes its own state database,
+# so it is granted no capabilities at all. Reading the live nftables ruleset
+# would require CAP_NET_ADMIN, which equally permits flushing the whole
+# firewall; access lifetimes are taken from the knockd log instead.
+#
+# One-time setup:
+#   useradd --system --user-group --no-create-home --shell /usr/sbin/nologin knockd-agent
+#   install -m 0755 knockd-agent /usr/local/bin/knockd-agent
+
+[Unit]
+Description=knockd agent
+Documentation=https://github.com/NullGeorge/congenial-octo-doodle
+After=knockd.service
+Wants=knockd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/knockd-agent run -service knockd
+User=knockd-agent
+Group=knockd-agent
+
+# The journal is reachable through group membership, not through root: the
+# directory is root:systemd-journal with an ACL. Drop this line and the agent
+# reads nothing, which is the intended failure mode.
+SupplementaryGroups=systemd-journal
+
+# Creates /var/lib/knockd-agent owned by the service user, which is where the
+# default -db path points.
+StateDirectory=knockd-agent
+
+# No capability is needed, so none is permitted, and none can be regained.
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=true
+RestrictSUIDSGID=true
+
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
