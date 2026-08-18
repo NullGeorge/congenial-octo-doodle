@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -14,8 +15,10 @@ import (
 	"github.com/NullGeorge/congenial-octo-doodle/internal/agent"
 	"github.com/NullGeorge/congenial-octo-doodle/internal/geoip"
 	"github.com/NullGeorge/congenial-octo-doodle/internal/knockd"
+	"github.com/NullGeorge/congenial-octo-doodle/internal/notify"
 	"github.com/NullGeorge/congenial-octo-doodle/internal/state"
 	"github.com/NullGeorge/congenial-octo-doodle/internal/storage"
+	"github.com/NullGeorge/congenial-octo-doodle/internal/telegram"
 )
 
 func main() {
@@ -48,6 +51,12 @@ func run(args []string) error {
 	dbPath := fs.String("db", "/var/lib/knockd-agent/state.db", "SQLite database path")
 	service := fs.String("service", "knockd", "systemd service name")
 	geoPath := fs.String("geoip", "", "optional IPv4 country range CSV; disabled when empty")
+	tokenPath := fs.String("telegram-token-file", "", "file holding the bot token; notifications are off when empty")
+	chatID := fs.Int64("telegram-chat-id", 0, "chat that receives notifications")
+	apiURL := fs.String("telegram-api", telegram.DefaultBaseURL, "Bot API base url; override only for testing")
+	notifyEvery := fs.Duration("notify-interval", 10*time.Second, "how often the outbox is flushed")
+	heartbeatURL := fs.String("heartbeat-url", "", "external watchdog url pinged on a schedule")
+	heartbeatEvery := fs.Duration("heartbeat-interval", 5*time.Minute, "how often the watchdog is pinged")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -74,8 +83,38 @@ func run(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	log.Printf("starting knockd-agent service=%s db=%s geoip=%d ranges", *service, *dbPath, geo.Len())
+	notifying := false
+	if *tokenPath != "" {
+		token, err := readToken(*tokenPath)
+		if err != nil {
+			return err
+		}
+		if *chatID == 0 {
+			return fmt.Errorf("-telegram-chat-id is required together with -telegram-token-file")
+		}
+		notifier := notify.New(store, telegram.New(token, *apiURL), *chatID, log.Default())
+		go notifier.Run(ctx, *notifyEvery)
+		notifying = true
+	}
+	go notify.Heartbeat(ctx, *heartbeatURL, *heartbeatEvery, log.Default())
+
+	log.Printf("starting knockd-agent service=%s db=%s geoip=%d ranges notify=%t heartbeat=%t",
+		*service, *dbPath, geo.Len(), notifying, *heartbeatURL != "")
 	return runner.Run(ctx)
+}
+
+// readToken keeps the bot token out of the process arguments, which every
+// user on the host can read from ps.
+func readToken(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read telegram token: %w", err)
+	}
+	token := strings.TrimSpace(string(raw))
+	if token == "" {
+		return "", fmt.Errorf("telegram token file %s is empty", path)
+	}
+	return token, nil
 }
 
 // listRules prints the access the daemon recorded, with the lifetime each

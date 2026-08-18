@@ -42,9 +42,12 @@ CREATE TABLE IF NOT EXISTS events (
     rule TEXT,
     port INTEGER,
     stage INTEGER,
-    message TEXT
+    message TEXT,
+    ttl_seconds INTEGER,
+    delivered_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
+CREATE INDEX IF NOT EXISTS idx_events_undelivered ON events(delivered_at) WHERE delivered_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_events_source_ip ON events(source_ip);
 
 CREATE TABLE IF NOT EXISTS access_rules (
@@ -79,6 +82,8 @@ CREATE INDEX IF NOT EXISTS idx_attempts_source_ip ON attempts(source_ip);
 	for _, statement := range []string{
 		`ALTER TABLE events ADD COLUMN stage INTEGER`,
 		`ALTER TABLE events ADD COLUMN country TEXT`,
+		`ALTER TABLE events ADD COLUMN delivered_at TEXT`,
+		`ALTER TABLE events ADD COLUMN ttl_seconds INTEGER`,
 	} {
 		if _, err := s.db.Exec(statement); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {
@@ -97,10 +102,11 @@ func (s *Store) SaveEvent(event events.Event) error {
 	}
 
 	_, err := s.db.Exec(`
-INSERT OR IGNORE INTO events(id, type, timestamp, source_ip, country, rule, port, stage, message)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+INSERT OR IGNORE INTO events(id, type, timestamp, source_ip, country, rule, port, stage, ttl_seconds, message)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.ID, event.Type, event.Timestamp.UTC().Format(time.RFC3339Nano),
-		event.SourceIP, event.Country, event.Rule, event.Port, event.Stage, event.Message)
+		event.SourceIP, event.Country, event.Rule, event.Port, event.Stage,
+		int64(event.TTL/time.Second), event.Message)
 	return err
 }
 
@@ -180,4 +186,43 @@ FROM access_rules ORDER BY updated_at`)
 		rules = append(rules, rule)
 	}
 	return rules, rows.Err()
+}
+
+// UndeliveredEvents returns the oldest events not yet pushed to Telegram.
+// The database doubles as the outbox, so a network outage delays alerts
+// instead of losing them.
+func (s *Store) UndeliveredEvents(limit int) ([]events.Event, error) {
+	rows, err := s.db.Query(`
+SELECT id, type, timestamp, source_ip, country, rule, port, stage, ttl_seconds, message
+FROM events WHERE delivered_at IS NULL ORDER BY timestamp LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list undelivered events: %w", err)
+	}
+	defer rows.Close()
+
+	var pending []events.Event
+	for rows.Next() {
+		var event events.Event
+		var timestamp string
+		var sourceIP, country, rule, message sql.NullString
+		var ttlSeconds sql.NullInt64
+		if err := rows.Scan(&event.ID, &event.Type, &timestamp, &sourceIP, &country,
+			&rule, &event.Port, &event.Stage, &ttlSeconds, &message); err != nil {
+			return nil, fmt.Errorf("scan event: %w", err)
+		}
+		event.TTL = time.Duration(ttlSeconds.Int64) * time.Second
+		if event.Timestamp, err = time.Parse(time.RFC3339Nano, timestamp); err != nil {
+			return nil, fmt.Errorf("parse timestamp %q: %w", timestamp, err)
+		}
+		event.SourceIP, event.Country = sourceIP.String, country.String
+		event.Rule, event.Message = rule.String, message.String
+		pending = append(pending, event)
+	}
+	return pending, rows.Err()
+}
+
+func (s *Store) MarkDelivered(id string, at time.Time) error {
+	_, err := s.db.Exec(`UPDATE events SET delivered_at = ? WHERE id = ?`,
+		at.UTC().Format(time.RFC3339Nano), id)
+	return err
 }
