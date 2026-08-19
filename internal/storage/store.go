@@ -2,6 +2,7 @@ package storage
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -225,4 +226,87 @@ func (s *Store) MarkDelivered(id string, at time.Time) error {
 	_, err := s.db.Exec(`UPDATE events SET delivered_at = ? WHERE id = ?`,
 		at.UTC().Format(time.RFC3339Nano), id)
 	return err
+}
+
+// Summary is the one-glance view behind the status command.
+type Summary struct {
+	Events        int
+	Attempts      int
+	Undelivered   int
+	ActiveRules   int
+	LastEventType string
+	LastEventAt   time.Time
+}
+
+// Summary counts what the agent has recorded. A rule counts as active only
+// while its granted lifetime still has time left at now.
+func (s *Store) Summary(now time.Time) (Summary, error) {
+	var summary Summary
+	if err := s.db.QueryRow(`SELECT count(*) FROM events`).Scan(&summary.Events); err != nil {
+		return summary, fmt.Errorf("count events: %w", err)
+	}
+	if err := s.db.QueryRow(`SELECT count(*) FROM attempts`).Scan(&summary.Attempts); err != nil {
+		return summary, fmt.Errorf("count attempts: %w", err)
+	}
+	if err := s.db.QueryRow(`SELECT count(*) FROM events WHERE delivered_at IS NULL`).
+		Scan(&summary.Undelivered); err != nil {
+		return summary, fmt.Errorf("count undelivered: %w", err)
+	}
+	if err := s.db.QueryRow(`
+SELECT count(*) FROM access_rules
+WHERE state = 'open' AND (expires_at IS NULL OR expires_at > ?)`,
+		now.UTC().Format(time.RFC3339Nano)).Scan(&summary.ActiveRules); err != nil {
+		return summary, fmt.Errorf("count active rules: %w", err)
+	}
+
+	var lastType, lastAt sql.NullString
+	if err := s.db.QueryRow(`
+SELECT type, timestamp FROM events ORDER BY timestamp DESC LIMIT 1`).Scan(&lastType, &lastAt); err != nil &&
+		!errors.Is(err, sql.ErrNoRows) {
+		return summary, fmt.Errorf("read last event: %w", err)
+	}
+	summary.LastEventType = lastType.String
+	if lastAt.Valid {
+		parsed, err := time.Parse(time.RFC3339Nano, lastAt.String)
+		if err != nil {
+			return summary, fmt.Errorf("parse last event time %q: %w", lastAt.String, err)
+		}
+		summary.LastEventAt = parsed
+	}
+	return summary, nil
+}
+
+// Attempt is one recorded knock or failed sequence.
+type Attempt struct {
+	Timestamp time.Time
+	SourceIP  string
+	Rule      string
+	Status    string
+	Message   string
+}
+
+func (s *Store) ListAttempts(limit int) ([]Attempt, error) {
+	rows, err := s.db.Query(`
+SELECT timestamp, source_ip, rule, status, message
+FROM attempts ORDER BY timestamp DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list attempts: %w", err)
+	}
+	defer rows.Close()
+
+	var attempts []Attempt
+	for rows.Next() {
+		var attempt Attempt
+		var timestamp string
+		var rule, message sql.NullString
+		if err := rows.Scan(&timestamp, &attempt.SourceIP, &rule, &attempt.Status, &message); err != nil {
+			return nil, fmt.Errorf("scan attempt: %w", err)
+		}
+		if attempt.Timestamp, err = time.Parse(time.RFC3339Nano, timestamp); err != nil {
+			return nil, fmt.Errorf("parse attempt time %q: %w", timestamp, err)
+		}
+		attempt.Rule, attempt.Message = rule.String, message.String
+		attempts = append(attempts, attempt)
+	}
+	return attempts, rows.Err()
 }

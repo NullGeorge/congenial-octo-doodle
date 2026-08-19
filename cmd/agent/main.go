@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strconv"
 	"strings"
@@ -24,6 +25,9 @@ import (
 	"github.com/NullGeorge/congenial-octo-doodle/internal/version"
 )
 
+// defaultDatabase matches StateDirectory=knockd-agent in the shipped unit.
+const defaultDatabase = "/var/lib/knockd-agent/state.db"
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -36,7 +40,9 @@ func main() {
 			log.Fatal(err)
 		}
 	case "status":
-		fmt.Println("knockd-agent: status command will be connected to systemd in the next step")
+		if err := showStatus(os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
 	case "rules":
 		if err := listRules(os.Args[2:]); err != nil {
 			log.Fatal(err)
@@ -44,7 +50,9 @@ func main() {
 	case "version":
 		fmt.Println("knockd-agent " + version.String())
 	case "attempts":
-		fmt.Println("knockd-agent: attempts command will be connected to the state store in the next step")
+		if err := listAttempts(os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
 	default:
 		usage()
 		os.Exit(1)
@@ -53,7 +61,7 @@ func main() {
 
 func run(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
-	dbPath := fs.String("db", "/var/lib/knockd-agent/state.db", "SQLite database path")
+	dbPath := fs.String("db", defaultDatabase, "SQLite database path")
 	service := fs.String("service", "knockd", "systemd service name")
 	geoPath := fs.String("geoip", "", "optional IPv4 country range CSV; disabled when empty")
 	tokenPath := fs.String("telegram-token-file", "", "file holding the bot token; notifications are off when empty")
@@ -147,12 +155,92 @@ func credentials(tokenPath string, chatID int64) (string, int64, error) {
 	return token, chatID, nil
 }
 
+// showStatus answers "is this thing working" from the state database plus one
+// read-only question to systemd. It needs no privileges.
+func showStatus(args []string) error {
+	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	dbPath := fs.String("db", defaultDatabase, "SQLite database path")
+	service := fs.String("service", "knockd", "systemd service name")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	store, err := storage.Open(*dbPath)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	summary, err := store.Summary(time.Now().UTC())
+	if err != nil {
+		return err
+	}
+
+	writer := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(writer, "version\t%s\n", version.String())
+	fmt.Fprintf(writer, "database\t%s\n", *dbPath)
+	fmt.Fprintf(writer, "%s unit\t%s\n", *service, unitState(*service))
+	fmt.Fprintf(writer, "events\t%d recorded, %d not yet delivered\n", summary.Events, summary.Undelivered)
+	if summary.LastEventType != "" {
+		fmt.Fprintf(writer, "last event\t%s at %s\n",
+			summary.LastEventType, summary.LastEventAt.UTC().Format(time.RFC3339))
+	}
+	fmt.Fprintf(writer, "attempts\t%d recorded\n", summary.Attempts)
+	fmt.Fprintf(writer, "active access\t%d rule(s)\n", summary.ActiveRules)
+	return writer.Flush()
+}
+
+// unitState asks systemd whether knockd is running. is-active is a read-only
+// query that needs no privileges, and it exits non-zero for a stopped unit,
+// which is an answer rather than a failure.
+func unitState(service string) string {
+	output, _ := exec.Command("systemctl", "is-active", service).Output()
+	if state := strings.TrimSpace(string(output)); state != "" {
+		return state
+	}
+	return "unknown"
+}
+
+// listAttempts shows the knocks and failed sequences the agent has seen,
+// newest first.
+func listAttempts(args []string) error {
+	fs := flag.NewFlagSet("attempts", flag.ContinueOnError)
+	dbPath := fs.String("db", defaultDatabase, "SQLite database path")
+	limit := fs.Int("limit", 20, "how many recent attempts to show")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	store, err := storage.Open(*dbPath)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	attempts, err := store.ListAttempts(*limit)
+	if err != nil {
+		return err
+	}
+	if len(attempts) == 0 {
+		fmt.Println("no recorded attempts")
+		return nil
+	}
+
+	writer := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(writer, "TIME\tSOURCE IP\tRULE\tSTATUS")
+	for _, attempt := range attempts {
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\n", attempt.Timestamp.UTC().Format(time.RFC3339),
+			attempt.SourceIP, attempt.Rule, attempt.Status)
+	}
+	return writer.Flush()
+}
+
 // listRules prints the access the daemon recorded, with the lifetime each
 // grant carried. Nothing here reads the live firewall, so it needs no
 // privileges beyond the state database.
 func listRules(args []string) error {
 	fs := flag.NewFlagSet("rules", flag.ContinueOnError)
-	dbPath := fs.String("db", "/var/lib/knockd-agent/state.db", "SQLite database path")
+	dbPath := fs.String("db", defaultDatabase, "SQLite database path")
 	all := fs.Bool("all", false, "include rules whose lifetime already lapsed")
 	if err := fs.Parse(args); err != nil {
 		return err
