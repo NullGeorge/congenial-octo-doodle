@@ -61,7 +61,7 @@ helper reaches nft and is refused with "you must be root". See the comments in
 ## Install
 
 ```sh
-make build                                  # dist/knockd-agent, dist/knock-helper
+make build   # dist/knockd-agent, dist/knock-helper, dist/knock-watch
 useradd --system --user-group --no-create-home --shell /usr/sbin/nologin knockd-agent
 install -m 0755 dist/knockd-agent /usr/local/bin/
 install -m 0644 configs/knockd-agent.service /etc/systemd/system/
@@ -113,6 +113,46 @@ without a reply, so probing reveals nothing:
 /rules
 /knockd <start|stop|restart|status>
 ```
+
+## Watchdog
+
+`knock-watch` is the other half of `-heartbeat-url`, and it must run on a
+different machine: a dead host cannot report its own death.
+
+The agent checks in on a schedule. If check-ins stop for longer than `-grace`,
+the watchdog messages you **once**, and messages you again when they resume. A
+continuing outage does not repeat, because an alert that repeats every tick is
+an alert you learn to ignore.
+
+Fetch and build it on that machine:
+
+```sh
+wget -qO- https://github.com/NullGeorge/congenial-octo-doodle/archive/refs/tags/v0.2.0.tar.gz | tar xz
+cd congenial-octo-doodle-0.2.0
+make build                              # needs Docker, produces dist/knock-watch
+go build -o knock-watch ./cmd/knock-watch   # or this, with a Go toolchain
+```
+
+Run it with the same two variables the agent uses:
+
+```sh
+BOT_TOKEN=... CHAT_ID=... knock-watch \
+  -listen :9000 -token <secret> -name atsos -grace 15m
+```
+
+Then point the agent at it:
+
+```
+-heartbeat-url https://watch.example.com/ping/<secret> -heartbeat-interval 5m
+```
+
+`-token` is required and the program refuses to start without one. Anyone able
+to reach the ping URL can keep the alert suppressed forever, which is exactly
+the failure being guarded against. Pick `-grace` at a few times the heartbeat
+interval so one lost request is not an outage.
+
+Last-seen is persisted, so restarting the watchdog neither forgets an
+outstanding alert nor re-sends one.
 
 ## Build and test
 
