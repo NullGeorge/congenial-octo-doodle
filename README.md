@@ -154,6 +154,41 @@ interval so one lost request is not an outage.
 Last-seen is persisted, so restarting the watchdog neither forgets an
 outstanding alert nor re-sends one.
 
+## Keeping the ports reachable behind a UPnP router
+
+knockd sniffs the wire, it never binds a socket. Nothing on the host ever
+opens the sequence ports, so a home router has no reason to forward them and
+no reason to keep a UPnP lease alive. Leases expire, reboots wipe the table,
+and from then on every knock dies at the gateway. The symptom is nasty
+because it looks exactly like a wrong sequence: the journal stays empty and
+the agent has nothing to report.
+
+`configs/knock-portmap` re-asserts the mappings. It reads the ports out of
+knockd.conf rather than repeating them, so changing the sequence cannot leave
+the old ports open and the new ones shut.
+
+```sh
+apt install miniupnpc
+install -m 0755 configs/knock-portmap /usr/local/sbin/
+install -m 0644 configs/knock-portmap.service configs/knock-portmap.timer /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now knock-portmap.timer
+```
+
+The timer runs a minute after boot, because the gateway often comes up later
+than the host, and every fifteen minutes after that. Re-adding an existing
+mapping is a no-op, so it is safe to run by hand at any time:
+
+```sh
+knock-portmap && upnpc -l
+```
+
+This helps only where the router hands out a real public address. Behind
+carrier-grade NAT the mapping will be created and still nothing will arrive,
+because the address the router thinks it owns is not the one the internet
+routes to. Two signs to check first: a private next hop in `traceroute`, and
+`upnpc -s` reporting an external address that differs from what an outside
+service like icanhazip.com sees.
+
 ## Build and test
 
 There is no local Go toolchain requirement; everything runs in Docker.

@@ -1,0 +1,31 @@
+# Refreshes the UPnP mappings for the knock ports. Driven by the timer of the
+# same name; running it by hand is also fine.
+#
+# It talks plain HTTP to the gateway and reads knockd.conf, which is 0600
+# root:root, so it runs as root but is granted no capability whatsoever.
+
+[Unit]
+Description=Forward the knockd sequence ports through UPnP
+Documentation=https://github.com/NullGeorge/congenial-octo-doodle
+After=network-online.target knockd.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/knock-portmap
+
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native

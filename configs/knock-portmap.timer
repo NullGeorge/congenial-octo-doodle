@@ -1,0 +1,18 @@
+# A UPnP lease is not forever and a router reboot forgets everything, so the
+# mappings are re-asserted on a schedule rather than once at install time.
+# Re-adding a mapping that already exists is a no-op for the gateway.
+
+[Unit]
+Description=Refresh the knockd UPnP port mappings
+Documentation=https://github.com/NullGeorge/congenial-octo-doodle
+
+[Timer]
+# Soon after boot, because the gateway may come up later than this host.
+OnBootSec=1min
+OnUnitActiveSec=15min
+# If the machine was asleep or off when a run was due, do it on the next boot.
+Persistent=true
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

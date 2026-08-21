@@ -1,0 +1,65 @@
+#!/bin/sh
+# Keep the knock sequence ports forwarded through a UPnP router.
+#
+# knockd sniffs the wire, it never binds a socket, so nothing on this host ever
+# opens those ports and the router has no reason to keep a mapping alive by
+# itself. UPnP leases expire and a router reboot wipes the table, after which
+# every knock silently dies at the gateway and the symptom is indistinguishable
+# from a wrong sequence: the journal simply stays empty.
+#
+# Ports are read from knockd.conf rather than hardcoded, so changing the
+# sequence does not quietly leave the old ports open and the new ones shut.
+#
+# Install: /usr/local/sbin/knock-portmap, run by knock-portmap.timer.
+set -eu
+
+CONF=${KNOCKD_CONF:-/etc/knockd.conf}
+LEASE=${LEASE:-0}
+DESC=${DESC:-knockd}
+LAN_IP=${LAN_IP:-}
+
+command -v upnpc >/dev/null 2>&1 || {
+	echo "upnpc is missing: apt install miniupnpc" >&2
+	exit 1
+}
+[ -r "$CONF" ] || {
+	echo "cannot read $CONF" >&2
+	exit 1
+}
+
+# Every distinct port of every sequence in the file, deduplicated.
+# Spaces and carriage returns are stripped BEFORE the split: deleting the
+# whole [:space:] class after it would take the newlines too and glue every
+# port into one absurd number, which upnpc then truncates into a mapping for
+# a port nobody asked for.
+ports=$(sed -n 's/^[[:space:]]*[Ss]equence[[:space:]]*=[[:space:]]*//p' "$CONF" |
+	tr -d ' \t\r' | tr ',' '\n' | grep -E '^[0-9]+$' | sort -un)
+[ -n "$ports" ] || {
+	echo "no sequence found in $CONF" >&2
+	exit 1
+}
+
+if [ -z "$LAN_IP" ]; then
+	LAN_IP=$(ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')
+fi
+[ -n "$LAN_IP" ] || {
+	echo "cannot determine this host's address on the LAN" >&2
+	exit 1
+}
+
+# A router that refuses one mapping will usually refuse them all, but report
+# each one: a half-open sequence is the confusing case worth seeing in the log.
+failed=0
+for port in $ports; do
+	if upnpc -e "$DESC" -a "$LAN_IP" "$port" "$port" TCP "$LEASE" >/dev/null 2>&1; then
+		echo "mapped tcp/$port to $LAN_IP:$port"
+	else
+		echo "failed to map tcp/$port" >&2
+		failed=1
+	fi
+done
+
+if [ "$failed" -ne 0 ]; then
+	echo "at least one mapping was refused by the gateway" >&2
+	exit 1
+fi
