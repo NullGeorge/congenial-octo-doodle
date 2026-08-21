@@ -193,3 +193,80 @@ func TestParseCommandTTL(t *testing.T) {
 		}
 	}
 }
+
+// A log line is untrusted input: knockd interpolates whatever the kernel
+// reported, and the shape-matching regexes are deliberately loose. These are
+// the branches that keep a malformed line from becoming a malformed event.
+func TestParseLineRejectsMalformedAddresses(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		ok   bool
+		typ  events.Type
+		ip   string
+	}{
+		{
+			// The prefix regex matches four dotted numbers, which is not the
+			// same as matching an address.
+			name: "octet out of range in the client prefix",
+			line: "999.1.1.1: openSSH: Stage 1",
+		},
+		{
+			name: "octet out of range inside a command",
+			line: "openSSH: running command: /usr/sbin/nft add element inet portknock ssh_allowed { 300.1.2.3 timeout 15m }",
+			ok:   true, typ: events.AccessGranted, ip: "",
+		},
+		{
+			// A grant with no address at all is still a grant; it just cannot
+			// be attributed. Dropping it would hide a firewall change.
+			name: "command carries no address",
+			line: "openSSH: running command: /usr/sbin/nft add element inet portknock ssh_allowed { }",
+			ok:   true, typ: events.AccessGranted, ip: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := ParseLine(tt.line)
+			if ok != tt.ok {
+				t.Fatalf("ParseLine(%q) ok = %v, want %v", tt.line, ok, tt.ok)
+			}
+			if !tt.ok {
+				if got != (events.Event{}) {
+					t.Fatalf("ParseLine(%q) = %#v, want zero Event", tt.line, got)
+				}
+				return
+			}
+			if got.Type != tt.typ {
+				t.Errorf("type = %q, want %q", got.Type, tt.typ)
+			}
+			if got.SourceIP != tt.ip {
+				t.Errorf("source ip = %q, want %q", got.SourceIP, tt.ip)
+			}
+		})
+	}
+}
+
+// A stage number too large for an int must not take the parser down. The
+// sequence is still recognised, only the number is dropped.
+func TestParseLineSurvivesAnAbsurdStageNumber(t *testing.T) {
+	const line = "203.0.113.5: openSSH: Stage 99999999999999999999"
+	got, ok := ParseLine(line)
+	if !ok {
+		t.Fatalf("ParseLine(%q) gave up on an oversized stage", line)
+	}
+	if got.Stage != 0 {
+		t.Errorf("stage = %d, want 0 for a number that does not fit", got.Stage)
+	}
+	if got.Type != events.SequenceStarted {
+		t.Errorf("type = %q, want %q", got.Type, events.SequenceStarted)
+	}
+}
+
+// Units are summed, so a lifetime can cross the ceiling part way through the
+// spec rather than in a single component.
+func TestParseCommandTTLRejectsAnAccumulatedOverflow(t *testing.T) {
+	if ttl, ok := parseCommandTTL("300d300d"); ok {
+		t.Errorf("parseCommandTTL(\"300d300d\") = %s, want a refusal past the one year ceiling", ttl)
+	}
+}

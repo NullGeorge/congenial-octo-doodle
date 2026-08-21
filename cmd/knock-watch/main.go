@@ -88,11 +88,7 @@ func run(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/ping/"+*token, func(w http.ResponseWriter, r *http.Request) {
-		watch.handlePing(ctx, time.Now().UTC())
-		w.Write([]byte("ok\n"))
-	})
+	mux := newMux(ctx, *token, watch)
 
 	server := &http.Server{
 		Addr:              *listen,
@@ -113,6 +109,17 @@ func run(args []string) error {
 		return err
 	}
 	return nil
+}
+
+// newMux is the entire inbound surface: one secret path and nothing else. It
+// is a named function so the routing can be exercised without binding a port.
+func newMux(ctx context.Context, token string, watch *monitor) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ping/"+token, func(w http.ResponseWriter, r *http.Request) {
+		watch.handlePing(ctx, time.Now().UTC())
+		w.Write([]byte("ok\n"))
+	})
+	return mux
 }
 
 // monitor is the dead-man switch. The decisions are kept apart from the

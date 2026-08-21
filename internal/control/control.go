@@ -20,6 +20,10 @@ import (
 // pollWindow is how long a single getUpdates call is allowed to hang open.
 const pollWindow = 25 * time.Second
 
+// retryDelay is the pause after a failed poll, kept as a variable so tests do
+// not have to sit through it.
+var retryDelay = 5 * time.Second
+
 // API is the slice of the Bot API this package needs.
 type API interface {
 	GetUpdates(ctx context.Context, offset int64, wait time.Duration) ([]telegram.Update, error)
@@ -68,7 +72,7 @@ func (c *Controller) Run(ctx context.Context) {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(5 * time.Second):
+			case <-time.After(retryDelay):
 			}
 			continue
 		}

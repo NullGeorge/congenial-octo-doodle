@@ -1,0 +1,93 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Tags are needed so the build stamp matches what make build produces.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          check-latest: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "these files are not gofmt clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: vet
+        run: go vet ./...
+
+      # The race detector matters here: the agent runs the reader, the notifier,
+      # the command poller and the heartbeat concurrently against one store.
+      - name: test
+        run: go test -race -covermode=atomic -coverprofile=cover.out ./...
+
+      - name: coverage
+        run: |
+          go tool cover -func=cover.out | tail -1
+          total=$(go tool cover -func=cover.out | awk '/^total:/ {print substr($3, 1, length($3)-1)}')
+          echo "total coverage: $total%"
+          minimum=80
+          awk -v got="$total" -v min="$minimum" 'BEGIN {
+            if (got + 0 < min + 0) {
+              printf "coverage %.1f%% is below the %d%% floor\n", got, min
+              exit 1
+            }
+          }'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: cover.out
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Proves the shipped Dockerfile and the version stamping still work,
+      # which plain go build would not catch.
+      - name: build every binary through the shipped Makefile
+        run: make build
+
+      - name: the binaries report the version they were stamped with
+        run: |
+          for binary in dist/knockd-agent dist/knock-helper dist/knock-watch; do
+            test -x "$binary" || { echo "$binary missing"; exit 1; }
+          done
+          docker run --rm -v "$PWD/dist:/d" alpine:3.22 /d/knockd-agent version
+          docker run --rm -v "$PWD/dist:/d" alpine:3.22 /d/knock-helper version
+          docker run --rm -v "$PWD/dist:/d" alpine:3.22 /d/knock-watch version
+
+  units:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # A unit file that systemd refuses is a deployment that fails at 3am.
+      - name: validate the systemd unit and the sudoers policy
+        run: |
+          sudo cp configs/knockd-agent.service /etc/systemd/system/
+          systemd-analyze verify /etc/systemd/system/knockd-agent.service || true
+          systemd-analyze security --offline=true configs/knockd-agent.service | tail -1
+          sudo visudo -c -f configs/sudoers.knockd-agent

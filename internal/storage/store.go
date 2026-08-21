@@ -33,7 +33,7 @@ func Open(path string) (*Store, error) {
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) migrate() error {
-	const schema = `
+	const tables = `
 CREATE TABLE IF NOT EXISTS events (
     id TEXT PRIMARY KEY,
     type TEXT NOT NULL,
@@ -47,9 +47,6 @@ CREATE TABLE IF NOT EXISTS events (
     ttl_seconds INTEGER,
     delivered_at TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
-CREATE INDEX IF NOT EXISTS idx_events_undelivered ON events(delivered_at) WHERE delivered_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_events_source_ip ON events(source_ip);
 
 CREATE TABLE IF NOT EXISTS access_rules (
     source_ip TEXT NOT NULL,
@@ -71,17 +68,17 @@ CREATE TABLE IF NOT EXISTS attempts (
     status TEXT NOT NULL,
     message TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_attempts_timestamp ON attempts(timestamp);
-CREATE INDEX IF NOT EXISTS idx_attempts_source_ip ON attempts(source_ip);
 `
-	if _, err := s.db.Exec(schema); err != nil {
+	if _, err := s.db.Exec(tables); err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
 	}
 
 	// Databases created before a column existed need it added. SQLite has no
-	// ADD COLUMN IF NOT EXISTS, so a duplicate column is not an error.
+	// ADD COLUMN IF NOT EXISTS, so a duplicate column is not an error. Rows
+	// written before stage existed get 0 rather than NULL, because reads scan
+	// that column into a plain int.
 	for _, statement := range []string{
-		`ALTER TABLE events ADD COLUMN stage INTEGER`,
+		`ALTER TABLE events ADD COLUMN stage INTEGER DEFAULT 0`,
 		`ALTER TABLE events ADD COLUMN country TEXT`,
 		`ALTER TABLE events ADD COLUMN delivered_at TEXT`,
 		`ALTER TABLE events ADD COLUMN ttl_seconds INTEGER`,
@@ -90,6 +87,21 @@ CREATE INDEX IF NOT EXISTS idx_attempts_source_ip ON attempts(source_ip);
 			!strings.Contains(err.Error(), "duplicate column name") {
 			return fmt.Errorf("%s: %w", statement, err)
 		}
+	}
+
+	// Indexes are created last: the partial index over delivered_at cannot be
+	// built before the ALTER TABLE above has added that column to an older
+	// database, and a failure there would make the file unopenable.
+	const indexes = `
+CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
+CREATE INDEX IF NOT EXISTS idx_events_undelivered ON events(delivered_at) WHERE delivered_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_events_source_ip ON events(source_ip);
+
+CREATE INDEX IF NOT EXISTS idx_attempts_timestamp ON attempts(timestamp);
+CREATE INDEX IF NOT EXISTS idx_attempts_source_ip ON attempts(source_ip);
+`
+	if _, err := s.db.Exec(indexes); err != nil {
+		return fmt.Errorf("migrate sqlite indexes: %w", err)
 	}
 	return nil
 }

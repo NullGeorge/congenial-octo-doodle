@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -151,5 +153,148 @@ func TestGetUpdatesToleratesMessagelessUpdate(t *testing.T) {
 	}
 	if len(updates) != 1 || updates[0].Message != nil {
 		t.Fatalf("got %+v, want one update with no message", updates)
+	}
+}
+
+// testdata/getupdates.json is a verbatim getUpdates response from the live bot,
+// with only the account id replaced. It carries fields this client does not
+// model (entities, language_code, is_premium, sticker), which is the point:
+// the Bot API adds fields over time and a strict decoder would break on them.
+func TestGetUpdatesDecodesARealApiResponse(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("testdata", "getupdates.json"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(body)
+	}))
+	defer server.Close()
+
+	updates, err := New(testToken, server.URL).GetUpdates(context.Background(), 0, time.Second)
+	if err != nil {
+		t.Fatalf("GetUpdates: %v", err)
+	}
+	if len(updates) != 6 {
+		t.Fatalf("decoded %d updates, want 6", len(updates))
+	}
+
+	want := []struct {
+		id   int64
+		text string
+	}{
+		{id: 128673120, text: "/rules"},
+		{id: 128673121, text: "/allow 192.0.2.1 5m"},
+		{id: 128673122, text: "/knockd status"},
+		// Typed on a Russian keyboard layout by mistake; it must reach the
+		// controller as ordinary text rather than blow up on the way.
+		{id: 128673123, text: "пгпшоз"},
+		// Stickers are messages with no text field at all. A nil dereference
+		// here would take the command poller down for the price of one emoji.
+		{id: 128673124, text: ""},
+		{id: 128673125, text: ""},
+	}
+	for i, expected := range want {
+		got := updates[i]
+		if got.UpdateID != expected.id {
+			t.Errorf("update %d id = %d, want %d", i, got.UpdateID, expected.id)
+		}
+		if got.Message == nil {
+			t.Fatalf("update %d has no message", i)
+		}
+		if got.Message.Text != expected.text {
+			t.Errorf("update %d text = %q, want %q", i, got.Message.Text, expected.text)
+		}
+		if got.Message.Chat.ID != 111111111 {
+			t.Errorf("update %d chat = %d, want the fixture chat", i, got.Message.Chat.ID)
+		}
+		if got.Message.From == nil || got.Message.From.ID != 111111111 {
+			t.Errorf("update %d sender was not decoded: %+v", i, got.Message.From)
+		}
+	}
+}
+
+func TestNewDefaultsAndTrimsTheBaseURL(t *testing.T) {
+	if got := New("t", "").baseURL; got != DefaultBaseURL {
+		t.Errorf("empty base url = %q, want %q", got, DefaultBaseURL)
+	}
+	// A trailing slash from a config file must not produce a double slash in
+	// the request path, which the Bot API answers with 404.
+	if got := New("t", "http://stub:8080/").baseURL; got != "http://stub:8080" {
+		t.Errorf("base url = %q, want the trailing slash removed", got)
+	}
+}
+
+// The Bot API answers errors as JSON, but a proxy or a captive portal answers
+// with HTML. That must be reported as unreadable rather than parsed as success.
+func TestCallRejectsANonJsonResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		w.Write([]byte("<html>502 Bad Gateway</html>"))
+	}))
+	defer server.Close()
+
+	err := New(testToken, server.URL).SendMessage(context.Background(), 1, "hi")
+	if err == nil {
+		t.Fatal("SendMessage accepted an HTML body")
+	}
+	for _, want := range []string{"sendMessage", "502", "unreadable"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %v, want it to mention %q", err, want)
+		}
+	}
+}
+
+// ok:true with a result that is not a list of updates must fail loudly; the
+// poller would otherwise treat a broken response as "no commands".
+func TestGetUpdatesRejectsAnUnexpectedResult(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"ok":true,"result":{"not":"a list"}}`))
+	}))
+	defer server.Close()
+
+	if _, err := New(testToken, server.URL).GetUpdates(context.Background(), 0, time.Second); err == nil {
+		t.Fatal("GetUpdates accepted a result that is not a list")
+	}
+}
+
+func TestGetUpdatesReportsAnApiError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		w.Write([]byte(`{"ok":false,"error_code":409,"description":"Conflict: terminated by other getUpdates request"}`))
+	}))
+	defer server.Close()
+
+	_, err := New(testToken, server.URL).GetUpdates(context.Background(), 0, time.Second)
+	if err == nil || !strings.Contains(err.Error(), "Conflict") {
+		t.Fatalf("error = %v, want the api description", err)
+	}
+}
+
+// A cancelled context must surface as an error rather than an empty result.
+func TestCallHonoursTheContext(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := New(testToken, server.URL).SendMessage(ctx, 1, "hi"); err == nil {
+		t.Fatal("SendMessage succeeded with a cancelled context")
+	}
+}
+
+// redact only rewrites when there is something to hide; a tokenless client
+// must not have its errors mangled.
+func TestRedactLeavesTokenlessErrorsAlone(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	server.Close()
+
+	err := New("", server.URL).SendMessage(context.Background(), 1, "hi")
+	if err == nil {
+		t.Fatal("expected a transport error")
+	}
+	if strings.Contains(err.Error(), "REDACTED") {
+		t.Errorf("error = %v, want it untouched when there is no token", err)
 	}
 }

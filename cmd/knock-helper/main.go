@@ -21,10 +21,15 @@ import (
 	"github.com/NullGeorge/congenial-octo-doodle/internal/version"
 )
 
-const (
+// The two binaries this helper is allowed to run. They are variables rather
+// than constants only so a test can point them at a stub; every real build
+// uses these absolute paths.
+var (
 	nftPath       = "/usr/sbin/nft"
 	systemctlPath = "/usr/bin/systemctl"
+)
 
+const (
 	family  = "inet"
 	table   = "portknock"
 	setName = "ssh_allowed"

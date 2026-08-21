@@ -1,0 +1,201 @@
+{
+ "ok": true,
+ "result": [
+  {
+   "update_id": 128673120,
+   "message": {
+    "message_id": 37,
+    "from": {
+     "id": 111111111,
+     "is_bot": false,
+     "first_name": "-",
+     "language_code": "ru",
+     "is_premium": true
+    },
+    "chat": {
+     "id": 111111111,
+     "first_name": "-",
+     "type": "private"
+    },
+    "date": 1787301750,
+    "text": "/rules",
+    "entities": [
+     {
+      "offset": 0,
+      "length": 6,
+      "type": "bot_command"
+     }
+    ]
+   }
+  },
+  {
+   "update_id": 128673121,
+   "message": {
+    "message_id": 38,
+    "from": {
+     "id": 111111111,
+     "is_bot": false,
+     "first_name": "-",
+     "language_code": "ru",
+     "is_premium": true
+    },
+    "chat": {
+     "id": 111111111,
+     "first_name": "-",
+     "type": "private"
+    },
+    "date": 1787301771,
+    "text": "/allow 192.0.2.1 5m",
+    "entities": [
+     {
+      "offset": 0,
+      "length": 6,
+      "type": "bot_command"
+     },
+     {
+      "offset": 7,
+      "length": 9,
+      "type": "url"
+     }
+    ]
+   }
+  },
+  {
+   "update_id": 128673122,
+   "message": {
+    "message_id": 39,
+    "from": {
+     "id": 111111111,
+     "is_bot": false,
+     "first_name": "-",
+     "language_code": "ru",
+     "is_premium": true
+    },
+    "chat": {
+     "id": 111111111,
+     "first_name": "-",
+     "type": "private"
+    },
+    "date": 1787301784,
+    "text": "/knockd status",
+    "entities": [
+     {
+      "offset": 0,
+      "length": 7,
+      "type": "bot_command"
+     }
+    ]
+   }
+  },
+  {
+   "update_id": 128673123,
+   "message": {
+    "message_id": 40,
+    "from": {
+     "id": 111111111,
+     "is_bot": false,
+     "first_name": "-",
+     "language_code": "ru",
+     "is_premium": true
+    },
+    "chat": {
+     "id": 111111111,
+     "first_name": "-",
+     "type": "private"
+    },
+    "date": 1787301786,
+    "text": "пгпшоз"
+   }
+  },
+  {
+   "update_id": 128673124,
+   "message": {
+    "message_id": 41,
+    "from": {
+     "id": 111111111,
+     "is_bot": false,
+     "first_name": "-",
+     "language_code": "ru",
+     "is_premium": true
+    },
+    "chat": {
+     "id": 111111111,
+     "first_name": "-",
+     "type": "private"
+    },
+    "date": 1787301790,
+    "sticker": {
+     "width": 512,
+     "height": 512,
+     "emoji": "😞",
+     "set_name": "meow4829",
+     "is_animated": false,
+     "is_video": false,
+     "type": "regular",
+     "thumbnail": {
+      "file_id": "AAMCAgADGQEAAylqiA-eIzckOEMaYTbaKaERry0X9AACElsAAsViuEryhtgNuBoKSAEAB20AAz0E",
+      "file_unique_id": "AQADElsAAsViuEpy",
+      "file_size": 6030,
+      "width": 320,
+      "height": 320
+     },
+     "thumb": {
+      "file_id": "AAMCAgADGQEAAylqiA-eIzckOEMaYTbaKaERry0X9AACElsAAsViuEryhtgNuBoKSAEAB20AAz0E",
+      "file_unique_id": "AQADElsAAsViuEpy",
+      "file_size": 6030,
+      "width": 320,
+      "height": 320
+     },
+     "file_id": "CAACAgIAAxkBAAMpaogPniM3JDhDGmE22imhEa8tF_QAAhJbAALFYrhK8obYDbgaCkg9BA",
+     "file_unique_id": "AgADElsAAsViuEo",
+     "file_size": 11192
+    }
+   }
+  },
+  {
+   "update_id": 128673125,
+   "message": {
+    "message_id": 42,
+    "from": {
+     "id": 111111111,
+     "is_bot": false,
+     "first_name": "-",
+     "language_code": "ru",
+     "is_premium": true
+    },
+    "chat": {
+     "id": 111111111,
+     "first_name": "-",
+     "type": "private"
+    },
+    "date": 1787301793,
+    "sticker": {
+     "width": 512,
+     "height": 512,
+     "emoji": "🤔",
+     "set_name": "CREmot",
+     "is_animated": false,
+     "is_video": false,
+     "type": "regular",
+     "thumbnail": {
+      "file_id": "AAMCAQADGQEAAypqiA-hyVeqHJ8e5hmVf5XibNVKSwACIgAE1VcWM2w3bxwM_SkBAAdtAAM9BA",
+      "file_unique_id": "AQADIgAE1VcWcg",
+      "file_size": 11082,
+      "width": 320,
+      "height": 320
+     },
+     "thumb": {
+      "file_id": "AAMCAQADGQEAAypqiA-hyVeqHJ8e5hmVf5XibNVKSwACIgAE1VcWM2w3bxwM_SkBAAdtAAM9BA",
+      "file_unique_id": "AQADIgAE1VcWcg",
+      "file_size": 11082,
+      "width": 320,
+      "height": 320
+     },
+     "file_id": "CAACAgEAAxkBAAMqaogPoclXqhyfHuYZlX-V4mzVSksAAiIABNVXFjNsN28cDP0pPQQ",
+     "file_unique_id": "AgADIgAE1VcW",
+     "file_size": 16888
+    }
+   }
+  }
+ ]
+}
