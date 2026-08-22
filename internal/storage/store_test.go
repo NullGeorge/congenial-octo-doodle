@@ -515,6 +515,69 @@ func TestSaveRuleUpsertsOnKeyAndRoundTripsExpiry(t *testing.T) {
 	}
 }
 
+// The firewall set holds one element per address, so a revoke clears the whole
+// address whatever section or port opened it, and only that address.
+func TestCloseRulesShutsEveryRuleForOneAddress(t *testing.T) {
+	store, _ := newStore(t)
+
+	granted := time.Now().UTC().Truncate(time.Second).Add(-time.Minute)
+	expires := granted.Add(15 * time.Minute)
+	for _, rule := range []AccessRule{
+		{SourceIP: "203.0.113.5", Rule: "openSSH", Port: 22, Protocol: "tcp",
+			State: "open", Source: "knockd", UpdatedAt: granted, ExpiresAt: &expires},
+		{SourceIP: "203.0.113.5", Rule: "manual", Port: 2222, Protocol: "tcp",
+			State: "open", Source: "knockd", UpdatedAt: granted, ExpiresAt: &expires},
+		{SourceIP: "198.51.100.167", Rule: "openSSH", Port: 22, Protocol: "tcp",
+			State: "open", Source: "knockd", UpdatedAt: granted, ExpiresAt: &expires},
+	} {
+		if err := store.SaveRule(rule); err != nil {
+			t.Fatalf("save rule for %s: %v", rule.SourceIP, err)
+		}
+	}
+
+	closedAt := granted.Add(time.Minute)
+	if err := store.CloseRules("203.0.113.5", closedAt); err != nil {
+		t.Fatalf("close rules: %v", err)
+	}
+
+	stored, err := store.ListRules()
+	if err != nil {
+		t.Fatalf("list rules: %v", err)
+	}
+	if len(stored) != 3 {
+		t.Fatalf("listed %d rules, want the 3 saved: %+v", len(stored), stored)
+	}
+	for _, rule := range stored {
+		if rule.SourceIP == "198.51.100.167" {
+			if rule.State != "open" || rule.ExpiresAt == nil {
+				t.Errorf("closing one address disturbed %+v", rule)
+			}
+			continue
+		}
+		if rule.State != "closed" {
+			t.Errorf("rule %+v survived the revoke as %q", rule, rule.State)
+		}
+		if rule.ExpiresAt != nil {
+			t.Errorf("closed rule %+v still carries an expiry", rule)
+		}
+		if !rule.UpdatedAt.Equal(closedAt) {
+			t.Errorf("updated_at = %v, want the revoke time %v", rule.UpdatedAt, closedAt)
+		}
+	}
+
+	// Nothing to close is not a failure; a revoke may follow a restart.
+	if err := store.CloseRules("192.0.2.77", closedAt); err != nil {
+		t.Errorf("closing an address that holds nothing: %v", err)
+	}
+	stored, err = store.ListRules()
+	if err != nil {
+		t.Fatalf("list rules after a no-op close: %v", err)
+	}
+	if len(stored) != 3 {
+		t.Errorf("a no-op close changed the row count to %d, want 3", len(stored))
+	}
+}
+
 func TestAccessRuleExpired(t *testing.T) {
 	now := time.Now().UTC()
 	past := now.Add(-time.Second)

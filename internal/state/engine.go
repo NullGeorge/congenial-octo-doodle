@@ -36,32 +36,43 @@ func (e *Engine) Apply(event events.Event) error {
 		return nil
 	}
 
-	status := "observed"
-	switch event.Type {
-	case events.AccessGranted:
-		status = "open"
-	case events.AccessRevoked:
-		status = "closed"
-	}
-
-	if event.Type == events.AccessGranted || event.Type == events.AccessRevoked {
+	if event.Type == events.AccessGranted {
 		rule := AccessRule{
 			SourceIP:  event.SourceIP,
 			Rule:      event.Rule,
 			Port:      event.Port,
 			Protocol:  "tcp",
-			State:     status,
+			State:     "open",
 			Source:    "knockd",
 			UpdatedAt: event.Timestamp,
 		}
 		// The firewall command states how long it grants access for, so the
 		// lapse is known up front and never has to be read back from nftables.
-		if event.Type == events.AccessGranted && event.TTL > 0 {
+		if event.TTL > 0 {
 			expiresAt := event.Timestamp.Add(event.TTL)
 			rule.ExpiresAt = &expiresAt
 		}
 		e.rules[ruleKey(event.SourceIP, event.Rule, event.Port)] = rule
 		if err := e.store.SaveRule(rule); err != nil {
+			return err
+		}
+	}
+
+	// A revoke names whichever section ran the delete, which is not the
+	// section that opened the address. Keying on it would leave the original
+	// grant advertised as open after the address is already gone. Revoking an
+	// address that holds nothing closes nothing and is not an error.
+	if event.Type == events.AccessRevoked {
+		for key, rule := range e.rules {
+			if rule.SourceIP != event.SourceIP {
+				continue
+			}
+			rule.State = "closed"
+			rule.UpdatedAt = event.Timestamp
+			rule.ExpiresAt = nil
+			e.rules[key] = rule
+		}
+		if err := e.store.CloseRules(event.SourceIP, event.Timestamp); err != nil {
 			return err
 		}
 	}

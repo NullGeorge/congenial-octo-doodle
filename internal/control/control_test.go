@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NullGeorge/congenial-octo-doodle/internal/events"
 	"github.com/NullGeorge/congenial-octo-doodle/internal/state"
 	"github.com/NullGeorge/congenial-octo-doodle/internal/storage"
 	"github.com/NullGeorge/congenial-octo-doodle/internal/telegram"
@@ -502,6 +503,39 @@ func TestRevokeClosesTheRuleItRecorded(t *testing.T) {
 	// keeps advertising access that no longer exists.
 	if reply := controller.rules(); reply != "no active access rules" {
 		t.Errorf("rules after a revoke = %q", reply)
+	}
+}
+
+// Most grants come from a knock, not from /allow, and the section that opened
+// the address is not the one a revoke names. The revoke still has to clear it:
+// the address is gone from the firewall set either way.
+func TestRevokeClosesAKnockedGrant(t *testing.T) {
+	controller, api, exec := newController(t)
+
+	if err := controller.engine.Apply(events.Event{
+		ID:        "knock",
+		Type:      events.AccessGranted,
+		SourceIP:  "203.0.113.5",
+		Rule:      "openSSH",
+		TTL:       15 * time.Minute,
+		Timestamp: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("record a knocked grant: %v", err)
+	}
+	if reply := controller.rules(); !strings.Contains(reply, "203.0.113.5") {
+		t.Fatalf("rules before the revoke = %q, want the knocked grant listed", reply)
+	}
+
+	controller.handle(context.Background(), message(ownerChat, "/revoke 203.0.113.5"))
+
+	if len(exec.calls) != 1 || exec.calls[0] != "revoke 203.0.113.5" {
+		t.Fatalf("executor calls = %v", exec.calls)
+	}
+	if last := api.sent[len(api.sent)-1]; last != "revoked 203.0.113.5" {
+		t.Errorf("reply = %q, want the helper output", last)
+	}
+	if reply := controller.rules(); reply != "no active access rules" {
+		t.Errorf("rules after revoking a knocked grant = %q", reply)
 	}
 }
 

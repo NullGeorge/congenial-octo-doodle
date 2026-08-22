@@ -168,6 +168,16 @@ ON CONFLICT(source_ip, rule, port, protocol) DO UPDATE SET
 	return err
 }
 
+// CloseRules shuts every rule for one address. The firewall set holds one
+// element per address, so an address is either allowed or it is not; which
+// knockd section opened it does not survive the revoke.
+func (s *Store) CloseRules(sourceIP string, at time.Time) error {
+	_, err := s.db.Exec(`
+UPDATE access_rules SET state = 'closed', updated_at = ?, expires_at = NULL
+WHERE source_ip = ?`, at.UTC().Format(time.RFC3339Nano), sourceIP)
+	return err
+}
+
 func (s *Store) ListRules() ([]AccessRule, error) {
 	rows, err := s.db.Query(`
 SELECT source_ip, rule, port, protocol, state, source, updated_at, expires_at
