@@ -72,12 +72,11 @@ jobs:
 
       - name: the binaries report the version they were stamped with
         run: |
-          for binary in dist/knockd-agent dist/knock-helper dist/knock-watch; do
+          for binary in dist/knockd-agent dist/knock-helper; do
             test -x "$binary" || { echo "$binary missing"; exit 1; }
           done
           docker run --rm -v "$PWD/dist:/d" alpine:3.22 /d/knockd-agent version
           docker run --rm -v "$PWD/dist:/d" alpine:3.22 /d/knock-helper version
-          docker run --rm -v "$PWD/dist:/d" alpine:3.22 /d/knock-watch version
 
   units:
     runs-on: ubuntu-latest

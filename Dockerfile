@@ -17,13 +17,11 @@ ENV STAMP="-s -w \
 
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="$STAMP" -o /out/knockd-agent ./cmd/agent
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="$STAMP" -o /out/knock-helper ./cmd/knock-helper
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="$STAMP" -o /out/knock-watch ./cmd/knock-watch
 
 FROM scratch AS export
-COPY --from=build /out/knockd-agent /out/knock-helper /out/knock-watch /
+COPY --from=build /out/knockd-agent /out/knock-helper /
 
 FROM alpine:3.22
 COPY --from=build /out/knockd-agent /usr/local/bin/knockd-agent
 COPY --from=build /out/knock-helper /usr/local/sbin/knock-helper
-COPY --from=build /out/knock-watch /usr/local/bin/knock-watch
 ENTRYPOINT ["/usr/local/bin/knockd-agent"]
