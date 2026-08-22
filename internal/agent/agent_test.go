@@ -267,7 +267,7 @@ func TestAgentRunResolvesCountries(t *testing.T) {
 		countries[event.SourceIP] = event.Country
 	}
 	for ip, want := range map[string]string{
-		"192.0.2.134":   "BG",
+		"192.0.2.134":    "BG",
 		"203.0.113.5":    "RU",
 		"198.51.100.167": "",
 	} {
